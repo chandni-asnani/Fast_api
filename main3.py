@@ -14,29 +14,25 @@ from fuzzywuzzy import process
 
 
 
-# =================== Using Google search and BeautifulSoup library ============= 
+
 
 app = FastAPI()
 
-async def google_scrape(url):
+async def google_scrape(query):
+    response = {}
     start = datetime.now()
+    url = f"https://www.google.com/search?q={query}"
     page = requests.get(url)
     soup = BeautifulSoup(page.content, "html.parser")
+    headings = soup.find_all(['h3'])
+    for i in headings:
+        if i.find_parent('a'):
+            title = i.find('div').text
+            url = i.find_parent('a').get("href").replace("/url?q=", '').split("&sa")[0]
+            response[url] = title
+
     end = datetime.now()
     print(end - start)
-    return soup.title.text
-
-async def output(url_domain, response, url):
-    # start = datetime.now()
-    query = [i for i in conn.local.domain.find({"domain": url_domain})]
-    # end = datetime.now()
-    # print(end - start)
-    if not query:
-        try:
-            a = await google_scrape(url)
-            response[a] = url
-        except Exception as e:
-            logging.error(str(e))
     return response
 
 @app.get("/blacklisted_domain_list")
@@ -74,21 +70,21 @@ async def delete_domain(data:Domain):
 
 @app.get("/search/{query}")
 async def google_query(query,keyword=None):
-    response = {}
-    search_results = search(query, stop=10)
     start = datetime.now()
-
-
-    for url in search_results:
+    response = await google_scrape(query)
+    print(response)
+    for url in list(response.keys()):
+        print(url)
         url_domain = urlparse(f'{url}').netloc
-        response = await output(url_domain, response, url)
+        query = [i for i in conn.local.domain.find({"domain": url_domain})]
+        if query:
+            response.pop(url)
     end = datetime.now()
     data = {}
     if keyword:
         for title,url in response.items():
             matching = process.extractOne(keyword, [urlparse(f'{url}').netloc])
             data[(matching[-1], url)] = title
-        # data = dict(map(lambda x:((process.extractOne(keyword, [urlparse(f'{x[0]}').netloc])[-1], x[0]),x[-1]), response.items()))
         sorted_keys = sorted([*data], reverse=True)
         print(data)
         response = {data[x]: x[1] for x in sorted_keys}
